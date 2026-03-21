@@ -12,16 +12,16 @@ void main() async {
     statusBarColor: Colors.transparent,
     systemNavigationBarColor: Colors.transparent,
   ));
-  runApp(const ClaudeTerminalApp());
+  runApp(const NextermApp());
 }
 
-class ClaudeTerminalApp extends StatelessWidget {
+class NextermApp extends StatelessWidget {
   const ClaudeTerminalApp({super.key});
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Claude Terminal',
+      title: 'Nexterm',
       debugShowCheckedModeBanner: false,
       theme: ThemeData.dark().copyWith(
         colorScheme: const ColorScheme.dark(

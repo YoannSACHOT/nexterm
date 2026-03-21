@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class SshConfig {
@@ -38,8 +39,19 @@ class SshConfig {
   static Future<SshConfig> load() async {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString('ssh_config');
-    if (raw == null) return SshConfig();
-    return SshConfig.fromJson(jsonDecode(raw) as Map<String, dynamic>);
+    if (raw != null) {
+      return SshConfig.fromJson(jsonDecode(raw) as Map<String, dynamic>);
+    }
+    // Premier lancement : charger depuis config.local.json si présent
+    try {
+      final local = await rootBundle.loadString('config.local.json');
+      final config =
+          SshConfig.fromJson(jsonDecode(local) as Map<String, dynamic>);
+      await config.save();
+      return config;
+    } catch (_) {
+      return SshConfig();
+    }
   }
 
   Future<void> save() async {

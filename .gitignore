@@ -79,6 +79,7 @@ app.*.map.json
 /web/favicon.png
 
 # Secrets / Credentials
+config.local.json
 .env
 .env.*
 *.jks

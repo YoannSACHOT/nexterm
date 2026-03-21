@@ -43,13 +43,37 @@ git clone https://github.com/aecomyoa/nexterm.git
 cd nexterm
 ```
 
-### 2. Installer les dépendances
+### 2. Configurer la connexion SSH
+
+Copiez le fichier d'exemple et renseignez vos identifiants :
+
+```bash
+cp config.example.json config.local.json
+```
+
+Éditez `config.local.json` avec vos paramètres :
+
+```json
+{
+  "host": "192.168.1.100",
+  "port": 22,
+  "username": "ubuntu",
+  "password": "votre-mot-de-passe",
+  "excludePatterns": ["bmad"]
+}
+```
+
+> **Ce fichier est ignoré par git** — vos identifiants ne seront jamais commités.
+
+Au premier lancement, l'app charge automatiquement cette config. Vous pouvez ensuite la modifier depuis l'écran Paramètres.
+
+### 3. Installer les dépendances
 
 ```bash
 flutter pub get
 ```
 
-### 3. Lancer sur un appareil
+### 4. Lancer sur un appareil
 
 ```bash
 # Android (appareil connecté en USB)
@@ -65,7 +89,7 @@ flutter run -d linux
 flutter run -d chrome
 ```
 
-### 4. Build release Android
+### 5. Build release Android
 
 ```bash
 flutter build apk --release
