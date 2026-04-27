@@ -10,15 +10,18 @@ class NotificationService {
       settings: const InitializationSettings(android: android),
     );
 
-    await _plugin
+    final androidImpl = _plugin
         .resolvePlatformSpecificImplementation<
-            AndroidFlutterLocalNotificationsPlugin>()
-        ?.createNotificationChannel(const AndroidNotificationChannel(
-          'skill_done',
-          'Skills terminées',
-          description: 'Notification quand une skill est terminée',
-          importance: Importance.high,
-        ));
+            AndroidFlutterLocalNotificationsPlugin>();
+
+    await androidImpl?.requestNotificationsPermission();
+
+    await androidImpl?.createNotificationChannel(const AndroidNotificationChannel(
+      'skill_done',
+      'Skills terminées',
+      description: 'Notification quand une skill est terminée',
+      importance: Importance.high,
+    ));
   }
 
   static Future<void> show({

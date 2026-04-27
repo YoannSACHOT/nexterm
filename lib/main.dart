@@ -16,7 +16,7 @@ void main() async {
 }
 
 class NextermApp extends StatelessWidget {
-  const ClaudeTerminalApp({super.key});
+  const NextermApp({super.key});
 
   @override
   Widget build(BuildContext context) {

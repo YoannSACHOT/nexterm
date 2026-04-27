@@ -10,6 +10,7 @@ import '../models/skill.dart';
 import '../models/skill_session.dart';
 import '../models/ssh_config.dart';
 import '../services/connectivity_service.dart';
+import '../services/foreground_service.dart';
 import '../services/notification_service.dart';
 import '../services/skill_discovery.dart';
 import '../models/skill_history.dart';
@@ -73,6 +74,7 @@ class _HomeScreenState extends State<HomeScreen> {
     for (final s in _sessions) {
       s.dispose();
     }
+    ForegroundService.stopAll();
     super.dispose();
   }
 
@@ -140,6 +142,8 @@ class _HomeScreenState extends State<HomeScreen> {
       _sessions.add(session);
       _activeSessionId = sessionId;
     });
+
+    _syncForegroundService(status: skill.name);
 
     terminal.write('Lancement de ${skill.name}...\r\n');
 
@@ -220,6 +224,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
       terminal.write('\r\n[Session terminée — code $exitCode]\r\n');
       setState(() => session.status = success ? SkillStatus.done : SkillStatus.error);
+      _syncForegroundService();
 
       final rawOutput = session.output.toString();
       final cleanOutput = SkillHistoryEntry.stripAnsi(rawOutput);
@@ -240,6 +245,7 @@ class _HomeScreenState extends State<HomeScreen> {
       terminal.write('\r\n[Erreur: $e]\r\n');
       session.errorMessage = e.toString();
       setState(() => session.status = SkillStatus.error);
+      _syncForegroundService();
       final rawOutput = session.output.toString();
       final cleanOutput = SkillHistoryEntry.stripAnsi(rawOutput);
       SkillHistoryService.add(SkillHistoryEntry(
@@ -276,7 +282,16 @@ class _HomeScreenState extends State<HomeScreen> {
       _activeSessionId = sessionId;
     });
 
+    _syncForegroundService(status: 'Terminal Claude');
+
     _connectTerminalSession(session, terminal);
+  }
+
+  void _syncForegroundService({String? status}) {
+    final activeCount = _sessions.where((s) =>
+        s.status == SkillStatus.running ||
+        s.status == SkillStatus.connecting).length;
+    ForegroundService.sync(activeCount, status: status);
   }
 
   Future<void> _connectTerminalSession(
@@ -323,6 +338,7 @@ class _HomeScreenState extends State<HomeScreen> {
         onDone: () {
           terminal.write('\r\n[Session terminée]\r\n');
           setState(() => session.status = SkillStatus.done);
+          _syncForegroundService();
         },
       );
 
@@ -332,6 +348,7 @@ class _HomeScreenState extends State<HomeScreen> {
     } catch (e) {
       terminal.write('\r\n[Erreur: $e]\r\n');
       setState(() => session.status = SkillStatus.error);
+      _syncForegroundService();
     }
   }
 
@@ -343,6 +360,7 @@ class _HomeScreenState extends State<HomeScreen> {
       _terminals.remove(id);
       if (_activeSessionId == id) _activeSessionId = null;
     });
+    _syncForegroundService();
   }
 
   Future<void> _showSkillDialog(Skill skill) async {
@@ -1288,6 +1306,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     setState(() => session.status = SkillStatus.error);
+    _syncForegroundService();
   }
 }
 
