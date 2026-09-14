@@ -67,39 +67,40 @@ class SshProfile {
       }
       parts.add(cmd);
     } else if (claudeFlags.isNotEmpty) {
-      parts.add('export PATH="\$HOME/.local/bin:\$PATH" && claude $claudeFlags');
+      parts.add(
+        'export PATH="\$HOME/.local/bin:\$PATH" && claude $claudeFlags',
+      );
     }
 
     return parts.join(' && ');
   }
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'name': name,
-        'host': host,
-        'port': port,
-        'username': username,
-        'password': password,
-        'startupCommand': startupCommand,
-        'skipPermissions': skipPermissions,
-        'claudeModel': claudeModel,
-        'workingDirectory': workingDirectory,
-        'claudeExtraArgs': claudeExtraArgs,
-      };
+    'id': id,
+    'name': name,
+    'host': host,
+    'port': port,
+    'username': username,
+    'startupCommand': startupCommand,
+    'skipPermissions': skipPermissions,
+    'claudeModel': claudeModel,
+    'workingDirectory': workingDirectory,
+    'claudeExtraArgs': claudeExtraArgs,
+  };
 
   factory SshProfile.fromJson(Map<String, dynamic> json) => SshProfile(
-        id: json['id'] as String,
-        name: json['name'] as String,
-        host: json['host'] as String,
-        port: json['port'] as int? ?? 22,
-        username: json['username'] as String,
-        password: json['password'] as String,
-        startupCommand: json['startupCommand'] as String?,
-        skipPermissions: json['skipPermissions'] as bool? ?? false,
-        claudeModel: json['claudeModel'] as String?,
-        workingDirectory: json['workingDirectory'] as String?,
-        claudeExtraArgs: json['claudeExtraArgs'] as String?,
-      );
+    id: json['id'] as String,
+    name: json['name'] as String,
+    host: json['host'] as String,
+    port: json['port'] as int? ?? 22,
+    username: json['username'] as String,
+    password: json['password'] as String? ?? '',
+    startupCommand: json['startupCommand'] as String?,
+    skipPermissions: json['skipPermissions'] as bool? ?? false,
+    claudeModel: json['claudeModel'] as String?,
+    workingDirectory: json['workingDirectory'] as String?,
+    claudeExtraArgs: json['claudeExtraArgs'] as String?,
+  );
 
   String encode() => jsonEncode(toJson());
 

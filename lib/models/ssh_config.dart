@@ -1,7 +1,8 @@
 import 'dart:convert';
 
-import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import '../services/secure_storage_service.dart';
 
 class SshConfig {
   String host;
@@ -22,7 +23,6 @@ class SshConfig {
         'host': host,
         'port': port,
         'username': username,
-        'password': password,
         'excludePatterns': excludePatterns,
       };
 
@@ -36,25 +36,37 @@ class SshConfig {
             ['bmad'],
       );
 
-  static Future<SshConfig> load() async {
+  static const passwordStorageKey = 'ssh.config.password';
+
+  static Future<SshConfig> load({SecretStore? secretStore}) async {
+    final store = secretStore ?? defaultSecretStore;
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString('ssh_config');
     if (raw != null) {
-      return SshConfig.fromJson(jsonDecode(raw) as Map<String, dynamic>);
-    }
-    // Premier lancement : charger depuis config.local.json si présent
-    try {
-      final local = await rootBundle.loadString('config.local.json');
-      final config =
-          SshConfig.fromJson(jsonDecode(local) as Map<String, dynamic>);
-      await config.save();
+      final json = jsonDecode(raw) as Map<String, dynamic>;
+      final config = SshConfig.fromJson(json);
+      final legacyPassword = config.password;
+      var password = await store.read(passwordStorageKey);
+      if (password == null && legacyPassword.isNotEmpty) {
+        await store.write(passwordStorageKey, legacyPassword);
+        password = legacyPassword;
+      }
+      config.password = password ?? '';
+      if (json.containsKey('password')) {
+        await prefs.setString('ssh_config', jsonEncode(config.toJson()));
+      }
       return config;
-    } catch (_) {
-      return SshConfig();
     }
+    return SshConfig(password: await store.read(passwordStorageKey) ?? '');
   }
 
-  Future<void> save() async {
+  Future<void> save({SecretStore? secretStore}) async {
+    final store = secretStore ?? defaultSecretStore;
+    if (password.isEmpty) {
+      await store.delete(passwordStorageKey);
+    } else {
+      await store.write(passwordStorageKey, password);
+    }
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('ssh_config', jsonEncode(toJson()));
   }

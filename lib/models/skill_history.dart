@@ -31,8 +31,7 @@ class SkillHistoryEntry {
         .replaceAll('\r', '');
   }
 
-  Duration? get duration =>
-      finishedAt != null ? finishedAt!.difference(startedAt) : null;
+  Duration? get duration => finishedAt?.difference(startedAt);
 
   String get durationStr {
     final d = duration;
@@ -47,26 +46,24 @@ class SkillHistoryEntry {
   }
 
   Map<String, dynamic> toJson() => {
-        'skillId': skillId,
-        'skillName': skillName,
-        'arguments': arguments,
-        'startedAt': startedAt.toIso8601String(),
-        'finishedAt': finishedAt?.toIso8601String(),
-        'success': success,
-        'output': output,
-      };
+    'skillId': skillId,
+    'skillName': skillName,
+    'startedAt': startedAt.toIso8601String(),
+    'finishedAt': finishedAt?.toIso8601String(),
+    'success': success,
+  };
 
   factory SkillHistoryEntry.fromJson(Map<String, dynamic> json) =>
       SkillHistoryEntry(
         skillId: json['skillId'] as String,
         skillName: json['skillName'] as String,
-        arguments: json['arguments'] as String?,
+        arguments: null,
         startedAt: DateTime.parse(json['startedAt'] as String),
         finishedAt: json['finishedAt'] != null
             ? DateTime.parse(json['finishedAt'] as String)
             : null,
         success: json['success'] as bool? ?? true,
-        output: json['output'] as String?,
+        output: null,
       );
 }
 
@@ -77,12 +74,19 @@ class SkillHistoryService {
   static Future<List<SkillHistoryEntry>> load() async {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getStringList(_key) ?? [];
-    return raw
-        .map((e) =>
-            SkillHistoryEntry.fromJson(jsonDecode(e) as Map<String, dynamic>))
-        .toList()
-        .reversed
-        .toList(); // Plus récent en premier
+    final entries = raw
+        .map(
+          (e) =>
+              SkillHistoryEntry.fromJson(jsonDecode(e) as Map<String, dynamic>),
+        )
+        .toList();
+    final sanitized = entries
+        .map((entry) => jsonEncode(entry.toJson()))
+        .toList();
+    if (!_sameValues(raw, sanitized)) {
+      await prefs.setStringList(_key, sanitized);
+    }
+    return entries.reversed.toList(); // Plus récent en premier
   }
 
   /// Retourne la dernière entrée pour une skill donnée (avec output).
@@ -105,5 +109,13 @@ class SkillHistoryService {
       raw.removeRange(0, raw.length - _maxEntries);
     }
     await prefs.setStringList(_key, raw);
+  }
+
+  static bool _sameValues(List<String> left, List<String> right) {
+    if (left.length != right.length) return false;
+    for (var i = 0; i < left.length; i++) {
+      if (left[i] != right[i]) return false;
+    }
+    return true;
   }
 }
