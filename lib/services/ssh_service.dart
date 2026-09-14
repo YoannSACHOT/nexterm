@@ -7,12 +7,16 @@ import 'package:xterm/xterm.dart';
 
 import '../models/ssh_profile.dart';
 import '../models/terminal_tab.dart';
+import 'host_key_trust_service.dart';
+import 'ssh_client_factory.dart';
 
 class SshService {
   Future<TerminalTab> connect({
     required SshProfile profile,
     required String tabId,
     required String title,
+    required HostKeyTrustService hostKeyTrust,
+    required HostKeyConfirmation confirmHostKey,
     String? sessionName,
     void Function(String)? onError,
     void Function()? onDone,
@@ -35,10 +39,14 @@ class SshService {
         timeout: const Duration(seconds: 10),
       );
 
-      final client = SSHClient(
-        socket,
+      final client = SshClientFactory.create(
+        socket: socket,
+        host: profile.host,
+        port: profile.port,
         username: profile.username,
-        onPasswordRequest: () => profile.password,
+        password: profile.password,
+        hostKeyTrust: hostKeyTrust,
+        confirmHostKey: confirmHostKey,
       );
 
       tab.sshClient = client;
@@ -100,17 +108,25 @@ class SshService {
   }
 
   /// Test rapide de connexion SSH (ping)
-  Future<bool> testConnection(SshProfile profile) async {
+  Future<bool> testConnection(
+    SshProfile profile, {
+    required HostKeyTrustService hostKeyTrust,
+    required HostKeyConfirmation confirmHostKey,
+  }) async {
     try {
       final socket = await SSHSocket.connect(
         profile.host,
         profile.port,
         timeout: const Duration(seconds: 5),
       );
-      final client = SSHClient(
-        socket,
+      final client = SshClientFactory.create(
+        socket: socket,
+        host: profile.host,
+        port: profile.port,
         username: profile.username,
-        onPasswordRequest: () => profile.password,
+        password: profile.password,
+        hostKeyTrust: hostKeyTrust,
+        confirmHostKey: confirmHostKey,
       );
       client.close();
       return true;
