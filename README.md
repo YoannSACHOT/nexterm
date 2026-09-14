@@ -1,6 +1,6 @@
 # Nexterm
 
-> Client terminal mobile pour [Claude Code](https://docs.anthropic.com/en/docs/claude-code) — lancez vos skills, ouvrez un terminal interactif et surveillez votre usage, le tout depuis votre smartphone.
+> Client terminal mobile pour [Claude Code](https://docs.anthropic.com/en/docs/claude-code), pour lancer vos skills, ouvrir un terminal interactif et surveiller votre usage depuis votre smartphone.
 
 <p align="center">
   <img src="https://img.shields.io/badge/Flutter-3.11+-blue?logo=flutter" />
@@ -15,8 +15,9 @@
 - **Exécution de skills** — lancez n'importe quelle skill Claude Code avec ou sans arguments, avec capture complète de la sortie
 - **Terminal interactif** — session shell SSH complète avec émulateur xterm intégré (PTY, redimensionnement auto)
 - **Monitoring Claude Max** — usage session (5h), hebdomadaire, Sonnet, crédits extra, sessions actives — rafraîchi toutes les 2 min
-- **Historique d'exécution** — les 50 dernières exécutions avec statut, durée et sortie consultable
-- **Profils SSH multiples** — sauvegardez plusieurs configurations serveur
+- **Historique d'exécution** : les 50 dernières exécutions avec leur statut et leur durée, sans arguments ni sortie persistés
+- **Profils SSH multiples** : sauvegardez plusieurs configurations serveur, avec les mots de passe dans le stockage sécurisé du système
+- **Vérification des serveurs SSH** : confirmez l'empreinte au premier contact, puis refusez automatiquement toute clé différente
 - **Indicateurs de connectivité** — statut VPN et SSH en temps réel
 - **Notifications** — alerte locale quand une skill se termine
 - **Sessions SSH persistantes en arrière-plan** — un foreground service Android (notification permanente + WAKE_LOCK) maintient les sessions SSH actives même quand vous changez d'application, verrouillez l'écran ou lancez un autre app
@@ -46,27 +47,7 @@ cd nexterm
 
 ### 2. Configurer la connexion SSH
 
-Copiez le fichier d'exemple et renseignez vos identifiants :
-
-```bash
-cp config.example.json config.local.json
-```
-
-Éditez `config.local.json` avec vos paramètres :
-
-```json
-{
-  "host": "192.168.1.100",
-  "port": 22,
-  "username": "ubuntu",
-  "password": "votre-mot-de-passe",
-  "excludePatterns": ["bmad"]
-}
-```
-
-> **Ce fichier est ignoré par git** — vos identifiants ne seront jamais commités.
-
-Au premier lancement, l'app charge automatiquement cette config. Vous pouvez ensuite la modifier depuis l'écran Paramètres.
+Lancez l'application, puis renseignez la connexion depuis l'écran Paramètres. Le mot de passe est conservé dans Android Keystore ou iOS Keychain. Au premier contact avec le serveur, comparez l'empreinte affichée avec une source de confiance avant de la confirmer.
 
 ### 3. Installer les dépendances
 
@@ -92,10 +73,24 @@ flutter run -d chrome
 
 ### 5. Build release Android
 
+Créez `android/key.properties` avec une clé de production :
+
 ```bash
-flutter build apk --release
-# APK dans build/app/outputs/flutter-apk/app-release.apk
+storeFile=/chemin/absolu/vers/release.jks
+storePassword=mot-de-passe-du-keystore
+keyAlias=release
+keyPassword=mot-de-passe-de-la-cle
 ```
+
+Puis utilisez le chemin de build contrôlé :
+
+```bash
+tool/build_android_release.sh
+# AAB dans build/app/outputs/bundle/release/app-release.aab
+# Symboles privés dans build/symbols/android
+```
+
+La release refuse de démarrer sans signature de production, active R8 et génère toujours une version Dart obfusquée avec ses symboles séparés.
 
 ## Configuration
 
@@ -109,7 +104,7 @@ Au premier lancement, allez dans **Paramètres** (icône engrenage) et renseigne
 | **Password** | Mot de passe SSH | `•••••` |
 | **Exclude patterns** | Skills à masquer (séparées par virgule) | `bmad,deprecated` |
 
-La configuration est stockée localement sur l'appareil (SharedPreferences).
+Les métadonnées de configuration sont stockées dans SharedPreferences. Les mots de passe et les empreintes SSH de confiance sont stockés dans Android Keystore ou iOS Keychain.
 
 ## Utilisation
 
@@ -146,7 +141,7 @@ Le panneau usage (accessible depuis le dashboard) affiche :
 
 ### Historique
 
-Tapez l'icône historique (🕐) pour voir les exécutions passées, groupées par jour, avec statut succès/erreur, durée et sortie complète.
+Tapez l'icône historique (🕐) pour voir les exécutions passées, groupées par jour, avec leur statut et leur durée. Les arguments et la sortie du terminal ne sont pas persistés.
 
 ## Architecture
 
@@ -167,7 +162,9 @@ lib/
 │   └── terminal_tab.dart         # Onglet terminal
 ├── services/
 │   ├── connectivity_service.dart # Vérification VPN + SSH
+│   ├── host_key_trust_service.dart # Confiance persistante des clés d'hôte
 │   ├── skill_discovery.dart      # Scan distant des skills
+│   ├── ssh_client_factory.dart   # Client SSH avec vérification obligatoire
 │   ├── ssh_service.dart          # Connexion SSH shell
 │   ├── usage_service.dart        # Lecture usage Claude Max
 │   ├── notification_service.dart # Notifications locales
@@ -188,6 +185,7 @@ android/app/src/main/kotlin/com/jixter/claude_terminal/
 | [dartssh2](https://pub.dev/packages/dartssh2) | Client SSH (connexion, shell, exécution) |
 | [xterm](https://pub.dev/packages/xterm) | Émulateur de terminal (widget Flutter) |
 | [shared_preferences](https://pub.dev/packages/shared_preferences) | Persistance locale (config, cache, historique) |
+| [flutter_secure_storage](https://pub.dev/packages/flutter_secure_storage) | Mots de passe et empreintes SSH via Keystore/Keychain |
 | [flutter_local_notifications](https://pub.dev/packages/flutter_local_notifications) | Notifications Android/iOS |
 
 ## Sessions SSH en arrière-plan (Android)
