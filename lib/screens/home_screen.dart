@@ -11,8 +11,11 @@ import '../models/skill_session.dart';
 import '../models/ssh_config.dart';
 import '../services/connectivity_service.dart';
 import '../services/foreground_service.dart';
+import '../services/host_key_trust_service.dart';
 import '../services/notification_service.dart';
+import '../services/profile_service.dart';
 import '../services/skill_discovery.dart';
+import '../services/ssh_client_factory.dart';
 import '../models/skill_history.dart';
 import '../services/usage_service.dart';
 import 'history_screen.dart';
@@ -27,6 +30,7 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   final _connectivity = ConnectivityService();
+  final _hostKeyTrust = HostKeyTrustService();
   ConnectivityStatus? _status;
   bool _isChecking = false;
   SshConfig _config = SshConfig();
@@ -52,6 +56,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _init() async {
     _config = await SshConfig.load();
+    await ProfileService().loadProfiles();
+    await SkillHistoryService.load();
     // Charger le cache d'abord
     _skills = await SkillDiscovery.loadCached();
     setState(() {});
@@ -79,7 +85,11 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _fetchUsage() async {
-    final usage = await UsageService.fetch(_config);
+    final usage = await UsageService.fetch(
+      _config,
+      hostKeyTrust: _hostKeyTrust,
+      confirmHostKey: _confirmHostKey,
+    );
     if (mounted && usage != null) {
       setState(() => _usage = usage);
     }
@@ -108,6 +118,8 @@ class _HomeScreenState extends State<HomeScreen> {
       final skills = await SkillDiscovery.discover(
         _config,
         excludePatterns: _config.excludePatterns,
+        hostKeyTrust: _hostKeyTrust,
+        confirmHostKey: _confirmHostKey,
       );
       setState(() {
         _skills = skills;
@@ -121,6 +133,60 @@ class _HomeScreenState extends State<HomeScreen> {
         );
       }
     }
+  }
+
+  Future<bool> _confirmHostKey(HostKeyChallenge challenge) async {
+    if (!mounted) return false;
+    return await showDialog<bool>(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => AlertDialog(
+            backgroundColor: const Color(0xFF1A1A2E),
+            title: const Text(
+              'Nouvelle clé d’hôte SSH',
+              style: TextStyle(color: Colors.white),
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '${challenge.host}:${challenge.port}',
+                  style: const TextStyle(color: Colors.white),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  challenge.keyType,
+                  style: const TextStyle(color: Colors.white70),
+                ),
+                const SizedBox(height: 8),
+                SelectableText(
+                  challenge.fingerprintText,
+                  style: const TextStyle(
+                    color: Colors.greenAccent,
+                    fontFamily: 'monospace',
+                  ),
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  'Vérifiez cette empreinte avant de faire confiance à ce serveur.',
+                  style: TextStyle(color: Colors.white70),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Refuser'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Faire confiance'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
   }
 
   Future<void> _launchSkill(Skill skill, [String? arguments]) async {
@@ -154,10 +220,14 @@ class _HomeScreenState extends State<HomeScreen> {
         timeout: const Duration(seconds: 10),
       );
 
-      final client = SSHClient(
-        socket,
+      final client = SshClientFactory.create(
+        socket: socket,
+        host: _config.host,
+        port: _config.port,
         username: _config.username,
-        onPasswordRequest: () => _config.password,
+        password: _config.password,
+        hostKeyTrust: _hostKeyTrust,
+        confirmHostKey: _confirmHostKey,
       );
 
       session.sshClient = client;
@@ -305,10 +375,14 @@ class _HomeScreenState extends State<HomeScreen> {
         timeout: const Duration(seconds: 10),
       );
 
-      final client = SSHClient(
-        socket,
+      final client = SshClientFactory.create(
+        socket: socket,
+        host: _config.host,
+        port: _config.port,
         username: _config.username,
-        onPasswordRequest: () => _config.password,
+        password: _config.password,
+        hostKeyTrust: _hostKeyTrust,
+        confirmHostKey: _confirmHostKey,
       );
 
       session.sshClient = client;
@@ -1286,10 +1360,14 @@ class _HomeScreenState extends State<HomeScreen> {
         _config.port,
         timeout: const Duration(seconds: 5),
       );
-      final killClient = SSHClient(
-        socket,
+      final killClient = SshClientFactory.create(
+        socket: socket,
+        host: _config.host,
+        port: _config.port,
         username: _config.username,
-        onPasswordRequest: () => _config.password,
+        password: _config.password,
+        hostKeyTrust: _hostKeyTrust,
+        confirmHostKey: _confirmHostKey,
       );
       // Chercher et tuer les processus claude orphelins de cette session
       // Le SIGHUP devrait avoir tué le shell parent, mais claude peut survivre

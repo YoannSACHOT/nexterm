@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:dartssh2/dartssh2.dart';
 
 import '../models/ssh_config.dart';
+import 'host_key_trust_service.dart';
+import 'ssh_client_factory.dart';
 
 class UsageData {
   final int sessionPercent;
@@ -35,7 +37,11 @@ class UsageData {
 
 class UsageService {
   /// Lit le cache d'usage depuis ~/.claude/usage-cache.json via SSH.
-  static Future<UsageData?> fetch(SshConfig config) async {
+  static Future<UsageData?> fetch(
+    SshConfig config, {
+    required HostKeyTrustService hostKeyTrust,
+    required HostKeyConfirmation confirmHostKey,
+  }) async {
     try {
       final socket = await SSHSocket.connect(
         config.host,
@@ -43,10 +49,14 @@ class UsageService {
         timeout: const Duration(seconds: 5),
       );
 
-      final client = SSHClient(
-        socket,
+      final client = SshClientFactory.create(
+        socket: socket,
+        host: config.host,
+        port: config.port,
         username: config.username,
-        onPasswordRequest: () => config.password,
+        password: config.password,
+        hostKeyTrust: hostKeyTrust,
+        confirmHostKey: confirmHostKey,
       );
 
       try {
@@ -58,8 +68,11 @@ class UsageService {
         );
 
         final output = utf8.decode(result);
-        final usagePart =
-            _extractBetween(output, '===USAGE===', '===ACTIVE===');
+        final usagePart = _extractBetween(
+          output,
+          '===USAGE===',
+          '===ACTIVE===',
+        );
         final activePart = output.split('===ACTIVE===').last.trim();
 
         final activeSessions =
@@ -76,8 +89,7 @@ class UsageService {
 
         final fiveHour = data['five_hour'] as Map<String, dynamic>? ?? {};
         final sevenDay = data['seven_day'] as Map<String, dynamic>? ?? {};
-        final sonnet =
-            data['seven_day_sonnet'] as Map<String, dynamic>? ?? {};
+        final sonnet = data['seven_day_sonnet'] as Map<String, dynamic>? ?? {};
         final extra = data['extra_usage'] as Map<String, dynamic>? ?? {};
 
         // Calculer le temps restant pour le reset de session

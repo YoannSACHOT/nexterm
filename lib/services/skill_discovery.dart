@@ -5,22 +5,33 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/skill.dart';
 import '../models/ssh_config.dart';
+import 'host_key_trust_service.dart';
+import 'ssh_client_factory.dart';
 
 class SkillDiscovery {
   static const _cacheKey = 'cached_skills';
 
   /// Découvre les skills sur la machine distante via SSH.
-  static Future<List<Skill>> discover(SshConfig config, {List<String> excludePatterns = const []}) async {
+  static Future<List<Skill>> discover(
+    SshConfig config, {
+    List<String> excludePatterns = const [],
+    required HostKeyTrustService hostKeyTrust,
+    required HostKeyConfirmation confirmHostKey,
+  }) async {
     final socket = await SSHSocket.connect(
       config.host,
       config.port,
       timeout: const Duration(seconds: 10),
     );
 
-    final client = SSHClient(
-      socket,
+    final client = SshClientFactory.create(
+      socket: socket,
+      host: config.host,
+      port: config.port,
       username: config.username,
-      onPasswordRequest: () => config.password,
+      password: config.password,
+      hostKeyTrust: hostKeyTrust,
+      confirmHostKey: confirmHostKey,
     );
 
     try {
@@ -69,8 +80,7 @@ class SkillDiscovery {
       if (excludePatterns.isNotEmpty) {
         skills = skills.where((s) {
           final lower = s.id.toLowerCase();
-          return !excludePatterns
-              .any((p) => lower.contains(p.toLowerCase()));
+          return !excludePatterns.any((p) => lower.contains(p.toLowerCase()));
         }).toList();
       }
 
@@ -94,7 +104,8 @@ class SkillDiscovery {
       if (lines.isEmpty) continue;
 
       final rawId = lines[0].trim();
-      if (rawId.isEmpty || rawId.startsWith('*') || rawId.startsWith('/')) continue;
+      if (rawId.isEmpty || rawId.startsWith('*') || rawId.startsWith('/'))
+        continue;
 
       // Format: "projet:skill-name" ou "skill-name"
       String? project;
@@ -121,7 +132,8 @@ class SkillDiscovery {
 
       for (int i = 1; i < lines.length; i++) {
         final line = lines[i].trim();
-        if (line == '===PATH===' || (pathIdx != -1 && i == pathIdx + 1)) continue;
+        if (line == '===PATH===' || (pathIdx != -1 && i == pathIdx + 1))
+          continue;
 
         if (line == '---' && !inFrontmatter) {
           inFrontmatter = true;
@@ -152,13 +164,15 @@ class SkillDiscovery {
         }
       }
 
-      skills.add(Skill(
-        id: id,
-        description: description,
-        hasArguments: argCount > 0,
-        project: project,
-        filePath: filePath,
-      ));
+      skills.add(
+        Skill(
+          id: id,
+          description: description,
+          hasArguments: argCount > 0,
+          project: project,
+          filePath: filePath,
+        ),
+      );
     }
 
     return skills;
