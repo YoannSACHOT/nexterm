@@ -1,6 +1,6 @@
 # Nexterm
 
-> Client terminal mobile pour [Claude Code](https://docs.anthropic.com/en/docs/claude-code), pour lancer vos skills, ouvrir un terminal interactif et surveiller votre usage depuis votre smartphone.
+> Client terminal mobile pour Codex et [Claude Code](https://docs.anthropic.com/en/docs/claude-code), pour lancer vos skills, ouvrir un terminal interactif et surveiller votre usage depuis votre smartphone.
 
 <p align="center">
   <img src="https://img.shields.io/badge/Flutter-3.11+-blue?logo=flutter" />
@@ -113,7 +113,7 @@ Les métadonnées de configuration sont stockées dans SharedPreferences. Les mo
 L'écran principal affiche :
 - **Barre de statut** — indicateurs VPN (●) et SSH (●) en vert/rouge
 - **Grille de skills** — toutes les skills découvertes, avec icône et couleur par projet
-- **Terminal Claude** — carte spéciale pour ouvrir un terminal interactif
+- **Codex et Claude Code** : quatre cartes en tête pour les terminaux interactifs et les sessions autonomes
 
 ### Lancer une skill
 
@@ -123,12 +123,19 @@ L'écran principal affiche :
 4. La sortie s'affiche en temps réel dans un terminal intégré
 5. Une notification apparaît quand c'est terminé
 
-### Terminal interactif
+### Terminaux et sessions autonomes
 
-1. Tapez sur **Terminal Claude**
-2. Une session SSH interactive s'ouvre avec Claude Code pré-lancé
-3. Tapez vos commandes comme dans un vrai terminal
-4. Le terminal supporte le redimensionnement automatique
+Les quatre premières cartes sont **Codex**, **Claude Code**, **Session Codex** et **Session Claude Code**, même sans skill découverte.
+
+- **Codex** et **Claude Code** ouvrent leur CLI interactif dans un PTY SSH avec saisie et redimensionnement.
+- **Session Codex** et **Session Claude Code** lancent la recherche et la résolution de la prochaine issue activable en autonomie, via `codex exec` ou `claude -p`. Le prompt impose vérification, sauvegarde et relais persistant avant la fin de l'agent.
+- Après une sortie réussie du CLI, le lanceur appelle `~/.claude/hooks/session-closable.sh --check` toutes les 15 secondes. Seul un code 0 avec un verdict explicite `VERT :` permet la fermeture automatique de l'onglet, après enregistrement des métadonnées dans l'historique.
+- Un verdict rouge conserve la connexion en attente, sans nouveau tour IA. Une erreur du CLI, un hook absent ou un résultat indécidable conserve l'onglet avec l'erreur. Le silence du hook Stop et son cache ne sont jamais assimilés à un feu vert.
+- La présence de `/tmp/ops-issues.lock` ou `/tmp/ops-issues-ilotia.lock` retarde également la fermeture. Aucun mutex n'est supprimé par Nexterm, y compris s'il appartient à une autre session.
+
+Le serveur doit disposer des CLI authentifiés et du hook canonique exécutable pour les cartes autonomes. Codex conserve sa politique d'approbation et son sandbox configurés sur le serveur. Claude conserve le lancement existant avec `--dangerously-skip-permissions`.
+
+Le hook reste responsable de son périmètre de vérification. Son verdict ne remplace pas la vérification des worktrees externes et des processus de fond demandée à l'agent. Les connexions sont maintenues par le service Android tant que l'application reste en vie ; elles ne sont pas restaurées après un arrêt forcé de l'application.
 
 ### Monitoring usage
 

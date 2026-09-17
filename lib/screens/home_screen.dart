@@ -1,11 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:dartssh2/dartssh2.dart';
 import 'package:flutter/material.dart';
 import 'package:xterm/xterm.dart';
 
+import '../models/agent_launcher.dart';
 import '../models/skill.dart';
 import '../models/skill_session.dart';
 import '../models/ssh_config.dart';
@@ -105,11 +105,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _refreshAll() async {
-    await Future.wait([
-      _checkConnectivity(),
-      _fetchUsage(),
-      _discoverSkills(),
-    ]);
+    await Future.wait([_checkConnectivity(), _fetchUsage(), _discoverSkills()]);
   }
 
   Future<void> _discoverSkills() async {
@@ -128,9 +124,9 @@ class _HomeScreenState extends State<HomeScreen> {
     } catch (e) {
       setState(() => _isLoadingSkills = false);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Erreur: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Erreur: $e')));
       }
     }
   }
@@ -267,49 +263,53 @@ class _HomeScreenState extends State<HomeScreen> {
 
       // stdout -> terminal + capture output
       final stdoutDone = Completer<void>();
-      sshSession.stdout.listen(
-        (data) {
-          final text = utf8.decode(data, allowMalformed: true);
-          terminal.write(text);
-          session.output.write(text);
-        },
-        onDone: () => stdoutDone.complete(),
-      );
+      sshSession.stdout.listen((data) {
+        final text = utf8.decode(data, allowMalformed: true);
+        terminal.write(text);
+        session.output.write(text);
+      }, onDone: () => stdoutDone.complete());
 
       // stderr -> terminal + capture output
       final stderrDone = Completer<void>();
-      sshSession.stderr.listen(
-        (data) {
-          final text = utf8.decode(data, allowMalformed: true);
-          terminal.write(text);
-          session.output.write(text);
-        },
-        onDone: () => stderrDone.complete(),
-      );
+      sshSession.stderr.listen((data) {
+        final text = utf8.decode(data, allowMalformed: true);
+        terminal.write(text);
+        session.output.write(text);
+      }, onDone: () => stderrDone.complete());
 
       // Attendre que les streams soient terminés + session fermée
-      await Future.wait([stdoutDone.future, stderrDone.future, sshSession.done]);
+      await Future.wait([
+        stdoutDone.future,
+        stderrDone.future,
+        sshSession.done,
+      ]);
       final exitCode = sshSession.exitCode ?? -1;
       final success = exitCode == 0;
 
       terminal.write('\r\n[Session terminée — code $exitCode]\r\n');
-      setState(() => session.status = success ? SkillStatus.done : SkillStatus.error);
+      setState(
+        () => session.status = success ? SkillStatus.done : SkillStatus.error,
+      );
       _syncForegroundService();
 
       final rawOutput = session.output.toString();
       final cleanOutput = SkillHistoryEntry.stripAnsi(rawOutput);
-      SkillHistoryService.add(SkillHistoryEntry(
-        skillId: skill.id,
-        skillName: skill.name,
-        arguments: arguments,
-        startedAt: startTime,
-        finishedAt: DateTime.now(),
-        success: success,
-        output: cleanOutput,
-      ));
+      SkillHistoryService.add(
+        SkillHistoryEntry(
+          skillId: skill.id,
+          skillName: skill.name,
+          arguments: arguments,
+          startedAt: startTime,
+          finishedAt: DateTime.now(),
+          success: success,
+          output: cleanOutput,
+        ),
+      );
       NotificationService.show(
         title: '${skill.name} ${success ? 'terminé' : '— Erreur'}',
-        body: success ? 'Tap pour voir le résultat' : 'Code de sortie: $exitCode',
+        body: success
+            ? 'Tap pour voir le résultat'
+            : 'Code de sortie: $exitCode',
       );
     } catch (e) {
       terminal.write('\r\n[Erreur: $e]\r\n');
@@ -318,15 +318,17 @@ class _HomeScreenState extends State<HomeScreen> {
       _syncForegroundService();
       final rawOutput = session.output.toString();
       final cleanOutput = SkillHistoryEntry.stripAnsi(rawOutput);
-      SkillHistoryService.add(SkillHistoryEntry(
-        skillId: skill.id,
-        skillName: skill.name,
-        arguments: arguments,
-        startedAt: startTime,
-        finishedAt: DateTime.now(),
-        success: false,
-        output: cleanOutput.isNotEmpty ? cleanOutput : e.toString(),
-      ));
+      SkillHistoryService.add(
+        SkillHistoryEntry(
+          skillId: skill.id,
+          skillName: skill.name,
+          arguments: arguments,
+          startedAt: startTime,
+          finishedAt: DateTime.now(),
+          success: false,
+          output: cleanOutput.isNotEmpty ? cleanOutput : e.toString(),
+        ),
+      );
       NotificationService.show(
         title: '${skill.name} — Erreur',
         body: e.toString(),
@@ -334,13 +336,13 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  void _openTerminal() {
-    final sessionId = 'terminal_${DateTime.now().millisecondsSinceEpoch}';
+  void _openTerminal(AgentLauncher launcher) {
+    final sessionId = '${launcher.id}_${DateTime.now().microsecondsSinceEpoch}';
 
     final session = SkillSession(
       id: sessionId,
-      skillId: '_terminal',
-      skillName: 'Terminal Claude',
+      skillId: launcher.id,
+      skillName: launcher.title,
       startedAt: DateTime.now(),
     );
 
@@ -352,29 +354,41 @@ class _HomeScreenState extends State<HomeScreen> {
       _activeSessionId = sessionId;
     });
 
-    _syncForegroundService(status: 'Terminal Claude');
+    _syncForegroundService(status: launcher.title);
 
-    _connectTerminalSession(session, terminal);
+    _connectTerminalSession(session, terminal, launcher);
   }
 
   void _syncForegroundService({String? status}) {
-    final activeCount = _sessions.where((s) =>
-        s.status == SkillStatus.running ||
-        s.status == SkillStatus.connecting).length;
+    final activeCount = _sessions
+        .where(
+          (s) =>
+              s.status == SkillStatus.running ||
+              s.status == SkillStatus.connecting,
+        )
+        .length;
     ForegroundService.sync(activeCount, status: status);
   }
 
-  Future<void> _connectTerminalSession(
-      SkillSession session, Terminal terminal) async {
-    terminal.write('Connexion SSH...\r\n');
+  bool _hasSession(SkillSession session) =>
+      mounted && _sessions.contains(session);
 
+  Future<void> _connectTerminalSession(
+    SkillSession session,
+    Terminal terminal,
+    AgentLauncher launcher,
+  ) async {
+    terminal.write('Connexion SSH...\r\n');
     try {
       final socket = await SSHSocket.connect(
         _config.host,
         _config.port,
         timeout: const Duration(seconds: 10),
       );
-
+      if (!_hasSession(session)) {
+        socket.close();
+        return;
+      }
       final client = SshClientFactory.create(
         socket: socket,
         host: _config.host,
@@ -384,45 +398,77 @@ class _HomeScreenState extends State<HomeScreen> {
         hostKeyTrust: _hostKeyTrust,
         confirmHostKey: _confirmHostKey,
       );
-
       session.sshClient = client;
-      setState(() => session.status = SkillStatus.running);
-
-      terminal.write('Connecté.\r\n\r\n');
-
-      final sshSession = await client.shell(
+      final sshSession = await client.execute(
+        launcher.buildCommand(),
         pty: SSHPtyConfig(
-          width: terminal.viewWidth,
-          height: terminal.viewHeight,
+          width: terminal.viewWidth > 0 ? terminal.viewWidth : 80,
+          height: terminal.viewHeight > 0 ? terminal.viewHeight : 24,
         ),
       );
-
       session.sshSession = sshSession;
+      if (!_hasSession(session)) {
+        session.dispose();
+        return;
+      }
+      setState(() => session.status = SkillStatus.running);
+      terminal.onOutput = (data) => sshSession.write(utf8.encode(data));
+      terminal.onResize = (w, h, pw, ph) =>
+          sshSession.resizeTerminal(w, h, pw, ph);
+      void writeOutput(String text) {
+        if (_hasSession(session)) terminal.write(text);
+      }
 
-      terminal.onOutput = (data) {
-        sshSession.write(utf8.encode(data) as Uint8List);
-      };
-
-      terminal.onResize = (w, h, pw, ph) {
-        sshSession.resizeTerminal(w, h, pw, ph);
-      };
-
-      sshSession.stdout.listen(
-        (data) => terminal.write(utf8.decode(data, allowMalformed: true)),
-        onDone: () {
-          terminal.write('\r\n[Session terminée]\r\n');
-          setState(() => session.status = SkillStatus.done);
-          _syncForegroundService();
-        },
+      await Future.wait([
+        sshSession.stdout
+            .cast<List<int>>()
+            .transform(const Utf8Decoder(allowMalformed: true))
+            .forEach(writeOutput),
+        sshSession.stderr
+            .cast<List<int>>()
+            .transform(const Utf8Decoder(allowMalformed: true))
+            .forEach(writeOutput),
+        sshSession.done,
+      ]);
+      if (!_hasSession(session)) return;
+      final exitCode = sshSession.exitCode;
+      if (launcher.autonomous) {
+        await SkillHistoryService.add(
+          SkillHistoryEntry(
+            skillId: launcher.id,
+            skillName: launcher.title,
+            startedAt: session.startedAt,
+            finishedAt: DateTime.now(),
+            success: exitCode == 0,
+          ),
+        );
+      }
+      if (!mounted || !_sessions.contains(session)) return;
+      if (launcher.shouldClose(exitCode)) {
+        _closeSession(session.id);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('${launcher.title} fermée : feu vert du hook.'),
+          ),
+        );
+        return;
+      }
+      terminal.write(
+        '\r\n[Session terminée, code ${exitCode ?? "inconnu"}]\r\n',
       );
-
-      await Future.delayed(const Duration(milliseconds: 500));
-      sshSession.write(
-          utf8.encode('export PATH="\$HOME/.local/bin:\$PATH" && claude --dangerously-skip-permissions\n') as Uint8List);
+      setState(
+        () => session.status = exitCode == 0
+            ? SkillStatus.done
+            : SkillStatus.error,
+      );
     } catch (e) {
+      if (!_hasSession(session)) return;
       terminal.write('\r\n[Erreur: $e]\r\n');
+      session.errorMessage = e.toString();
       setState(() => session.status = SkillStatus.error);
-      _syncForegroundService();
+    } finally {
+      session.dispose();
+      if (mounted) _syncForegroundService();
     }
   }
 
@@ -453,14 +499,18 @@ class _HomeScreenState extends State<HomeScreen> {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Annuler',
-                  style: TextStyle(color: Colors.white38)),
+              child: const Text(
+                'Annuler',
+                style: TextStyle(color: Colors.white38),
+              ),
             ),
             ElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: skill.color),
               onPressed: () => Navigator.pop(ctx, true),
-              child:
-                  const Text('Lancer', style: TextStyle(color: Colors.white)),
+              child: const Text(
+                'Lancer',
+                style: TextStyle(color: Colors.white),
+              ),
             ),
           ],
         ),
@@ -480,23 +530,29 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       builder: (ctx) => Padding(
         padding: EdgeInsets.fromLTRB(
-          16, 16, 16,
+          16,
+          16,
+          16,
           MediaQuery.of(ctx).viewInsets.bottom + 16,
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(skill.name,
-                style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold)),
+            Text(
+              skill.name,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
             if (skill.description.isNotEmpty) ...[
               const SizedBox(height: 8),
-              Text(skill.description,
-                  style: const TextStyle(
-                      color: Colors.white54, fontSize: 13)),
+              Text(
+                skill.description,
+                style: const TextStyle(color: Colors.white54, fontSize: 13),
+              ),
             ],
             const SizedBox(height: 16),
             TextField(
@@ -534,21 +590,24 @@ class _HomeScreenState extends State<HomeScreen> {
                       if (ctx.mounted) Navigator.pop(ctx);
                     });
                   },
-                  child: const Text('Annuler',
-                      style: TextStyle(color: Colors.white38)),
+                  child: const Text(
+                    'Annuler',
+                    style: TextStyle(color: Colors.white38),
+                  ),
                 ),
                 const SizedBox(width: 8),
                 ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                      backgroundColor: skill.color),
+                  style: ElevatedButton.styleFrom(backgroundColor: skill.color),
                   onPressed: () {
                     FocusManager.instance.primaryFocus?.unfocus();
                     Future.delayed(const Duration(milliseconds: 100), () {
                       if (ctx.mounted) Navigator.pop(ctx, argsCtrl.text);
                     });
                   },
-                  child: const Text('Lancer',
-                      style: TextStyle(color: Colors.white)),
+                  child: const Text(
+                    'Lancer',
+                    style: TextStyle(color: Colors.white),
+                  ),
                 ),
               ],
             ),
@@ -582,11 +641,14 @@ class _HomeScreenState extends State<HomeScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(skill.name,
-                style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold)),
+            Text(
+              skill.name,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
             const SizedBox(height: 4),
             Text(
               'Dernier résultat : ${_formatDateTime(entry.finishedAt ?? entry.startedAt)} (${entry.durationStr})',
@@ -617,10 +679,15 @@ class _HomeScreenState extends State<HomeScreen> {
                       backgroundColor: skill.color,
                       padding: const EdgeInsets.symmetric(vertical: 14),
                     ),
-                    icon: const Icon(Icons.play_arrow,
-                        size: 18, color: Colors.white),
-                    label: const Text('Relancer',
-                        style: TextStyle(color: Colors.white)),
+                    icon: const Icon(
+                      Icons.play_arrow,
+                      size: 18,
+                      color: Colors.white,
+                    ),
+                    label: const Text(
+                      'Relancer',
+                      style: TextStyle(color: Colors.white),
+                    ),
                     onPressed: () {
                       Navigator.pop(ctx);
                       _showSkillDialog(skill);
@@ -638,9 +705,7 @@ class _HomeScreenState extends State<HomeScreen> {
   void _showOutputViewer(SkillHistoryEntry entry) {
     Navigator.push(
       context,
-      MaterialPageRoute(
-        builder: (_) => OutputViewerScreen(entry: entry),
-      ),
+      MaterialPageRoute(builder: (_) => OutputViewerScreen(entry: entry)),
     );
   }
 
@@ -687,8 +752,7 @@ class _HomeScreenState extends State<HomeScreen> {
             Padding(
               padding: const EdgeInsets.only(right: 12),
               child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                 decoration: BoxDecoration(
                   color: Colors.greenAccent.withValues(alpha: 0.2),
                   borderRadius: BorderRadius.circular(12),
@@ -696,7 +760,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 child: Text(
                   '${_sessions.where((s) => s.status == SkillStatus.running).length} en cours',
                   style: const TextStyle(
-                      color: Colors.greenAccent, fontSize: 11),
+                    color: Colors.greenAccent,
+                    fontSize: 11,
+                  ),
                 ),
               ),
             ),
@@ -707,7 +773,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 width: 20,
                 height: 20,
                 child: CircularProgressIndicator(
-                    strokeWidth: 2, color: Colors.white54),
+                  strokeWidth: 2,
+                  color: Colors.white54,
+                ),
               ),
             )
           else
@@ -767,14 +835,17 @@ class _HomeScreenState extends State<HomeScreen> {
               decoration: BoxDecoration(
                 border: _activeSessionId == null
                     ? const Border(
-                        bottom:
-                            BorderSide(color: Colors.greenAccent, width: 2))
+                        bottom: BorderSide(color: Colors.greenAccent, width: 2),
+                      )
                     : null,
               ),
-              child: Icon(Icons.dashboard, size: 18,
-                  color: _activeSessionId == null
-                      ? Colors.greenAccent
-                      : Colors.white38),
+              child: Icon(
+                Icons.dashboard,
+                size: 18,
+                color: _activeSessionId == null
+                    ? Colors.greenAccent
+                    : Colors.white38,
+              ),
             ),
           ),
           ..._sessions.map((s) {
@@ -794,16 +865,22 @@ class _HomeScreenState extends State<HomeScreen> {
                   border: isActive
                       ? const Border(
                           bottom: BorderSide(
-                              color: Colors.greenAccent, width: 2))
+                            color: Colors.greenAccent,
+                            width: 2,
+                          ),
+                        )
                       : null,
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Container(
-                      width: 6, height: 6,
+                      width: 6,
+                      height: 6,
                       decoration: BoxDecoration(
-                          color: statusColor, shape: BoxShape.circle),
+                        color: statusColor,
+                        shape: BoxShape.circle,
+                      ),
                     ),
                     const SizedBox(width: 6),
                     Text(
@@ -811,14 +888,18 @@ class _HomeScreenState extends State<HomeScreen> {
                           ? '${s.skillName.substring(0, 12)}…'
                           : s.skillName,
                       style: TextStyle(
-                          color: isActive ? Colors.white : Colors.white54,
-                          fontSize: 12),
+                        color: isActive ? Colors.white : Colors.white54,
+                        fontSize: 12,
+                      ),
                     ),
                     const SizedBox(width: 4),
                     GestureDetector(
                       onTap: () => _closeSession(s.id),
-                      child: const Icon(Icons.close,
-                          size: 14, color: Colors.white24),
+                      child: const Icon(
+                        Icons.close,
+                        size: 14,
+                        color: Colors.white24,
+                      ),
                     ),
                   ],
                 ),
@@ -834,19 +915,25 @@ class _HomeScreenState extends State<HomeScreen> {
     final color = connected == null
         ? Colors.grey
         : connected
-            ? Colors.greenAccent
-            : Colors.redAccent;
+        ? Colors.greenAccent
+        : Colors.redAccent;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
         Icon(
           connected == true ? Icons.check_circle : Icons.circle_outlined,
-          color: color, size: 14,
+          color: color,
+          size: 14,
         ),
         const SizedBox(width: 4),
-        Text(label,
-            style: TextStyle(
-                color: color, fontSize: 12, fontWeight: FontWeight.w600)),
+        Text(
+          label,
+          style: TextStyle(
+            color: color,
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
       ],
     );
   }
@@ -854,8 +941,9 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _buildUsageWidget() {
     final u = _usage!;
     final age = DateTime.now().difference(u.fetchedAt);
-    final ageStr =
-        age.inMinutes < 1 ? 'à l\'instant' : 'il y a ${age.inMinutes}min';
+    final ageStr = age.inMinutes < 1
+        ? 'à l\'instant'
+        : 'il y a ${age.inMinutes}min';
 
     return Container(
       padding: const EdgeInsets.all(14),
@@ -870,15 +958,17 @@ class _HomeScreenState extends State<HomeScreen> {
             children: [
               const Icon(Icons.speed, color: Colors.white54, size: 16),
               const SizedBox(width: 6),
-              const Text('Claude Max',
-                  style: TextStyle(
-                      color: Colors.white54,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600)),
+              const Text(
+                'Claude Max',
+                style: TextStyle(
+                  color: Colors.white54,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
               const Spacer(),
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 margin: const EdgeInsets.only(right: 6),
                 decoration: BoxDecoration(
                   color: u.activeSessions > 0
@@ -898,9 +988,10 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
               ),
-              Text(ageStr,
-                  style:
-                      const TextStyle(color: Colors.white70, fontSize: 10)),
+              Text(
+                ageStr,
+                style: const TextStyle(color: Colors.white70, fontSize: 10),
+              ),
             ],
           ),
           const SizedBox(height: 12),
@@ -908,7 +999,9 @@ class _HomeScreenState extends State<HomeScreen> {
           _usageBar(
             'Session',
             u.sessionPercent,
-            suffix: u.sessionReset.isNotEmpty ? 'reset ${u.sessionReset}' : null,
+            suffix: u.sessionReset.isNotEmpty
+                ? 'reset ${u.sessionReset}'
+                : null,
           ),
           const SizedBox(height: 8),
           // Hebdo
@@ -918,7 +1011,8 @@ class _HomeScreenState extends State<HomeScreen> {
             _usageBar(
               'Extra',
               u.extraPercent,
-              suffix: '${(u.extraUsed / 100).toStringAsFixed(0)}€/${(u.extraLimit / 100).toStringAsFixed(0)}€',
+              suffix:
+                  '${(u.extraUsed / 100).toStringAsFixed(0)}€/${(u.extraLimit / 100).toStringAsFixed(0)}€',
             ),
           ],
         ],
@@ -941,8 +1035,10 @@ class _HomeScreenState extends State<HomeScreen> {
       children: [
         SizedBox(
           width: 48,
-          child: Text(label,
-              style: const TextStyle(color: Colors.white54, fontSize: 11)),
+          child: Text(
+            label,
+            style: const TextStyle(color: Colors.white54, fontSize: 11),
+          ),
         ),
         Expanded(
           child: ClipRRect(
@@ -958,17 +1054,22 @@ class _HomeScreenState extends State<HomeScreen> {
         const SizedBox(width: 8),
         SizedBox(
           width: 35,
-          child: Text('$remaining%',
-              textAlign: TextAlign.right,
-              style: TextStyle(
-                  color: barColor,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600)),
+          child: Text(
+            '$remaining%',
+            textAlign: TextAlign.right,
+            style: TextStyle(
+              color: barColor,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
         ),
         if (suffix != null) ...[
           const SizedBox(width: 4),
-          Text(suffix,
-              style: const TextStyle(color: Colors.white, fontSize: 10)),
+          Text(
+            suffix,
+            style: const TextStyle(color: Colors.white, fontSize: 10),
+          ),
         ],
       ],
     );
@@ -980,13 +1081,18 @@ class _HomeScreenState extends State<HomeScreen> {
         children: [
           Icon(icon, color: Colors.greenAccent, size: 18),
           const SizedBox(height: 4),
-          Text(value,
-              style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold)),
-          Text(label,
-              style: const TextStyle(color: Colors.white38, fontSize: 10)),
+          Text(
+            value,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          Text(
+            label,
+            style: const TextStyle(color: Colors.white38, fontSize: 10),
+          ),
         ],
       ),
     );
@@ -1004,32 +1110,6 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildDashboard() {
-    if (_skills.isEmpty && !_isLoadingSkills) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.search_off, size: 48, color: Colors.white24),
-            const SizedBox(height: 16),
-            const Text('Aucune skill trouvée',
-                style: TextStyle(color: Colors.white38, fontSize: 16)),
-            const SizedBox(height: 24),
-            ElevatedButton.icon(
-              style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.greenAccent,
-                  foregroundColor: Colors.black),
-              icon: const Icon(Icons.refresh),
-              label: const Text('Rechercher'),
-              onPressed:
-                  _status?.allGood == true ? _discoverSkills : null,
-            ),
-            const SizedBox(height: 48),
-            _buildTerminalCard(),
-          ],
-        ),
-      );
-    }
-
     return RefreshIndicator(
       onRefresh: _refreshAll,
       color: Colors.greenAccent,
@@ -1037,6 +1117,20 @@ class _HomeScreenState extends State<HomeScreen> {
       child: CustomScrollView(
         physics: const AlwaysScrollableScrollPhysics(),
         slivers: [
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+            sliver: SliverGrid(
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 2,
+                crossAxisSpacing: 12,
+                mainAxisSpacing: 12,
+                mainAxisExtent: 174,
+              ),
+              delegate: SliverChildListDelegate(
+                AgentLauncher.cards.map(_buildTerminalCard).toList(),
+              ),
+            ),
+          ),
           SliverPadding(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
             sliver: SliverList(
@@ -1047,18 +1141,30 @@ class _HomeScreenState extends State<HomeScreen> {
                 ],
                 Row(
                   children: [
-                    const Text('Skills',
-                        style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 22,
-                            fontWeight: FontWeight.bold)),
+                    const Text(
+                      'Skills',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                     const Spacer(),
-                    Text('${_skills.length} skills',
-                        style: const TextStyle(
-                            color: Colors.white38, fontSize: 13)),
+                    Text(
+                      '${_skills.length} skills',
+                      style: const TextStyle(
+                        color: Colors.white38,
+                        fontSize: 13,
+                      ),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 12),
+                if (_skills.isEmpty && !_isLoadingSkills)
+                  const Text(
+                    'Aucune skill trouvée',
+                    style: TextStyle(color: Colors.white38),
+                  ),
               ]),
             ),
           ),
@@ -1069,10 +1175,7 @@ class _HomeScreenState extends State<HomeScreen> {
               crossAxisSpacing: 12,
               mainAxisSpacing: 12,
               childAspectRatio: 1.3,
-              children: [
-                ..._skills.map((s) => _buildSkillCard(s)),
-                _buildTerminalCard(),
-              ],
+              children: [..._skills.map((s) => _buildSkillCard(s))],
             ),
           ),
           const SliverPadding(padding: EdgeInsets.only(bottom: 16)),
@@ -1083,7 +1186,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _buildSkillCard(Skill skill) {
     // Trouver les sessions liées à cette skill
-    final relatedSessions = _sessions.where((s) => s.skillId == skill.id).toList();
+    final relatedSessions = _sessions
+        .where((s) => s.skillId == skill.id)
+        .toList();
     final runningSession = relatedSessions
         .where((s) => s.status == SkillStatus.running)
         .toList();
@@ -1139,10 +1244,10 @@ class _HomeScreenState extends State<HomeScreen> {
           border: isRunning
               ? Border.all(color: Colors.greenAccent, width: 2)
               : isDone
-                  ? Border.all(color: Colors.white24, width: 1)
-                  : isError
-                      ? Border.all(color: Colors.redAccent, width: 1)
-                      : null,
+              ? Border.all(color: Colors.white24, width: 1)
+              : isError
+              ? Border.all(color: Colors.redAccent, width: 1)
+              : null,
         ),
         padding: const EdgeInsets.all(14),
         child: Column(
@@ -1154,34 +1259,43 @@ class _HomeScreenState extends State<HomeScreen> {
                 const Spacer(),
                 if (isRunning)
                   const SizedBox(
-                    width: 16, height: 16,
+                    width: 16,
+                    height: 16,
                     child: CircularProgressIndicator(
-                        strokeWidth: 2, color: Colors.greenAccent),
+                      strokeWidth: 2,
+                      color: Colors.greenAccent,
+                    ),
                   )
                 else if (statusText != null)
                   Container(
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 6, vertical: 2),
+                      horizontal: 6,
+                      vertical: 2,
+                    ),
                     decoration: BoxDecoration(
                       color: statusColor!.withValues(alpha: 0.2),
                       borderRadius: BorderRadius.circular(8),
                     ),
-                    child: Text(statusText,
-                        style: TextStyle(
-                            color: statusColor, fontSize: 9)),
+                    child: Text(
+                      statusText,
+                      style: TextStyle(color: statusColor, fontSize: 9),
+                    ),
                   )
                 else if (skill.hasArguments)
                   const Icon(Icons.tune, color: Colors.white38, size: 16),
               ],
             ),
             const Spacer(),
-            Text(skill.name,
-                style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis),
+            Text(
+              skill.name,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
             const SizedBox(height: 2),
             if (hasSession)
               Text(
@@ -1191,20 +1305,22 @@ class _HomeScreenState extends State<HomeScreen> {
                 style: TextStyle(color: statusColor, fontSize: 10),
               )
             else
-              Text(skill.description,
-                  style:
-                      const TextStyle(color: Colors.white60, fontSize: 11),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis),
+              Text(
+                skill.description,
+                style: const TextStyle(color: Colors.white60, fontSize: 11),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildTerminalCard() {
+  Widget _buildTerminalCard(AgentLauncher launcher) {
     return GestureDetector(
-      onTap: _openTerminal,
+      key: ValueKey(launcher.id),
+      onTap: () => _openTerminal(launcher),
       child: Container(
         decoration: BoxDecoration(
           gradient: LinearGradient(
@@ -1216,28 +1332,39 @@ class _HomeScreenState extends State<HomeScreen> {
             ],
           ),
           borderRadius: BorderRadius.circular(16),
-          border:
-              Border.all(color: Colors.greenAccent.withValues(alpha: 0.3)),
+          border: Border.all(color: Colors.greenAccent.withValues(alpha: 0.3)),
         ),
         padding: const EdgeInsets.all(14),
-        child: const Column(
+        child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('>_',
-                style: TextStyle(
-                    fontSize: 26,
-                    color: Colors.greenAccent,
-                    fontWeight: FontWeight.bold,
-                    fontFamily: 'monospace')),
-            Spacer(),
-            Text('Terminal Claude',
-                style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600)),
-            SizedBox(height: 2),
-            Text('Session interactive',
-                style: TextStyle(color: Colors.white60, fontSize: 11)),
+            const Text(
+              '>_',
+              style: TextStyle(
+                fontSize: 26,
+                color: Colors.greenAccent,
+                fontWeight: FontWeight.bold,
+                fontFamily: 'monospace',
+              ),
+            ),
+            const Spacer(),
+            Text(
+              launcher.title,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              launcher.description,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: Colors.white60, fontSize: 11),
+            ),
           ],
         ),
       ),
@@ -1256,31 +1383,34 @@ class _HomeScreenState extends State<HomeScreen> {
           child: Row(
             children: [
               Icon(
-                session.skillId == '_terminal'
+                session.skillId.startsWith('terminal_')
                     ? Icons.terminal
                     : Icons.play_arrow,
-                color: Colors.greenAccent, size: 18,
+                color: Colors.greenAccent,
+                size: 18,
               ),
               const SizedBox(width: 8),
               Expanded(
-                child: Text(session.skillName,
-                    style:
-                        const TextStyle(color: Colors.white, fontSize: 14),
-                    overflow: TextOverflow.ellipsis),
+                child: Text(
+                  session.skillName,
+                  style: const TextStyle(color: Colors.white, fontSize: 14),
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
                   color: switch (session.status) {
-                    SkillStatus.connecting =>
-                      Colors.amber.withValues(alpha: 0.2),
-                    SkillStatus.running =>
-                      Colors.greenAccent.withValues(alpha: 0.2),
-                    SkillStatus.done =>
-                      Colors.white.withValues(alpha: 0.1),
-                    SkillStatus.error =>
-                      Colors.redAccent.withValues(alpha: 0.2),
+                    SkillStatus.connecting => Colors.amber.withValues(
+                      alpha: 0.2,
+                    ),
+                    SkillStatus.running => Colors.greenAccent.withValues(
+                      alpha: 0.2,
+                    ),
+                    SkillStatus.done => Colors.white.withValues(alpha: 0.1),
+                    SkillStatus.error => Colors.redAccent.withValues(
+                      alpha: 0.2,
+                    ),
                   },
                   borderRadius: BorderRadius.circular(8),
                 ),
@@ -1314,16 +1444,18 @@ class _HomeScreenState extends State<HomeScreen> {
                       color: Colors.redAccent.withValues(alpha: 0.2),
                       borderRadius: BorderRadius.circular(6),
                     ),
-                    child: const Icon(Icons.stop,
-                        color: Colors.redAccent, size: 18),
+                    child: const Icon(
+                      Icons.stop,
+                      color: Colors.redAccent,
+                      size: 18,
+                    ),
                   ),
                 ),
               const SizedBox(width: 6),
               // Close button
               GestureDetector(
                 onTap: () => _closeSession(session.id),
-                child: const Icon(Icons.close,
-                    color: Colors.white38, size: 18),
+                child: const Icon(Icons.close, color: Colors.white38, size: 18),
               ),
             ],
           ),
@@ -1333,7 +1465,9 @@ class _HomeScreenState extends State<HomeScreen> {
               ? TerminalView(
                   terminal,
                   textStyle: const TerminalStyle(
-                      fontSize: 12, fontFamily: 'monospace'),
+                    fontSize: 12,
+                    fontFamily: 'monospace',
+                  ),
                 )
               : const SizedBox.shrink(),
         ),
@@ -1422,8 +1556,9 @@ class OutputViewerScreen extends StatelessWidget {
                 Text(
                   entry.durationStr,
                   style: TextStyle(
-                    color:
-                        entry.success ? Colors.greenAccent : Colors.redAccent,
+                    color: entry.success
+                        ? Colors.greenAccent
+                        : Colors.redAccent,
                     fontSize: 12,
                   ),
                 ),
@@ -1463,8 +1598,10 @@ class OutputViewerScreen extends StatelessWidget {
                     ),
                   )
                 : const Center(
-                    child: Text('Aucun output enregistré',
-                        style: TextStyle(color: Colors.white38)),
+                    child: Text(
+                      'Aucun output enregistré',
+                      style: TextStyle(color: Colors.white38),
+                    ),
                   ),
           ),
         ],
